@@ -51,7 +51,7 @@ git clone https://github.com/<you>/tunnelguard.git
 cd tunnelguard
 
 swift build -c release     # CLI: .build/release/tunnelguard
-swift test                 # unit tests
+swift run TunnelGuardSelfTest  # 22 self checks, no test framework needed
 
 ./Scripts/build-app.sh     # produces TunnelGuard.app in ./dist
 ./Scripts/install-cli.sh   # optional: copies the CLI to /usr/local/bin
@@ -99,6 +99,7 @@ Resulting config:
 ## Use
 
 ```bash
+tunnelguard explain <host>       # DNS → route → source address → policy verdict
 tunnelguard status              # one screen: LAN, tunnel, routes, exit address
 tunnelguard doctor              # full diagnostics
 tunnelguard routes ensure        # recreate routes with -ifscope
@@ -108,6 +109,14 @@ tunnelguard dns apply            # write /etc/resolver files
 ```
 
 The menu bar app exposes the same actions. Its diagnostics window shows the same report as `doctor`.
+
+## Why explain instead of just configure
+
+Split tunnelling fails in layers: a scoped resolver may answer while the global one does not, a route
+may point at a gateway you left an hour ago, a correct route can still send packets with the tunnel's
+source address, and a kill switch may drop what you expect to work. `tunnelguard explain` walks the
+whole chain and reports the contradiction instead of a guess. See
+[docs/POSITIONING.md](docs/POSITIONING.md) for how this compares to existing tools.
 
 ## How the kill switch works
 

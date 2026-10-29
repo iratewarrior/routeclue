@@ -49,7 +49,7 @@ public enum DNSQuery {
 
     // MARK: - Пакеты
 
-    static func buildQuery(name: String, id: UInt16) -> [UInt8] {
+    public static func buildQuery(name: String, id: UInt16) -> [UInt8] {
         var bytes: [UInt8] = [
             UInt8(id >> 8), UInt8(id & 0xFF),
             0x01, 0x00, // RD
@@ -68,7 +68,7 @@ public enum DNSQuery {
         return bytes
     }
 
-    static func parseAddresses(_ data: [UInt8]) -> [String] {
+    public static func parseAddresses(_ data: [UInt8]) -> [String] {
         guard data.count > 12 else { return [] }
         let qd = Int(data[4]) << 8 | Int(data[5])
         let an = Int(data[6]) << 8 | Int(data[7])

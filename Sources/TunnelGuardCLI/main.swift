@@ -7,6 +7,7 @@ func printHelp() {
 
     USAGE
       tunnelguard status                     short state
+      tunnelguard explain <host>             explain DNS, route, source address and verdict
       tunnelguard doctor                     full diagnostics
       tunnelguard routes list|ensure|remove
       tunnelguard killswitch on|off|status
@@ -108,6 +109,10 @@ case "dns":
     default:
         fail("Unknown action: \(args[1])")
     }
+
+case "explain":
+    guard args.count > 1 else { fail("Usage: tunnelguard explain <host>") }
+    print(PathExplainer.explain(host: args[1], config: config).summary)
 
 case "config":
     let action = args.count > 1 ? args[1] : "path"
