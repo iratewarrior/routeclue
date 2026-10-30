@@ -31,9 +31,8 @@ HTTP probes — после рабочего базового набора, не 
 Переименовать package/products/targets/imports в RouteClue, CLI `routeclue`,
 app `RouteClue.app`, self-test `RouteClueSelfTest`; Scripts, CI, bundle metadata,
 README/help/version должны совпадать. Не переименовывать старые PF anchors или
-resolver-файлы автоматически. Existing config: read-only fallback старого
-Application Support/TunnelGuard при отсутствии нового config; явное сохранение
-в RouteClue, без потери/перезаписи старого файла. Ошибка JSON не превращается
+resolver-файлы автоматически. Existing config: сохранение
+в Application Support/RouteClue, без потери/перезаписи файла. Ошибка JSON не превращается
 в молчаливый defaults с последующей перезаписью. Миграцию покрыть temp-dir тестами.
 
 ## Этап 2. Исправить подтверждённые дефекты

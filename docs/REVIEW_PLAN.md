@@ -1,4 +1,4 @@
-# TunnelGuard: план доработок и независимой приёмки
+# RouteClue: план доработок и независимой приёмки
 
 Дата: 2026-10-30. Исполнитель: Antigravity. Координатор: Codex.
 
@@ -9,12 +9,12 @@
 
 ## Источники и текущий статус
 
-Изучены аудит Antigravity `tunnelguard-comprehensive-audit.md`, история его
+Изучены аудит Antigravity `comprehensive-audit.md`, история его
 терминала и незакоммиченный код в соседней рабочей копии `разработка-2`.
 В этой копии уже реализована большая часть плана B: Swift 6, ArgumentParser,
 popover, verify, snapshot/diff, NWPathMonitor и изменения PF.
 
-Координатор независимо выполнил `swift run -c release TunnelGuardSelfTest`:
+Координатор независимо выполнил `swift run -c release RouteClueSelfTest`:
 40 проверок прошли. Сборка выдала предупреждения линкера об отсутствующих
 каталогах frameworks/usr/lib Command Line Tools. Это не доказывает корректность
 PF, привилегированных операций или GUI.
@@ -50,7 +50,7 @@ firewall нельзя принимать без проверки. Изоляци
    PathExplainer берёт последний элемент строки как интерфейс и теряет записи
    с Expire. Проверять короткие префиксы, host routes, scoped routes, ожидаемый
    шлюз и интерфейс. Убрать compactMap из строгого разбора адресов/CIDR.
-2. PF: общий Enabled не равен защите TunnelGuard. Неизвестное состояние показывать
+2. PF: общий Enabled не равен защите RouteClue. Неизвестное состояние показывать
    явно. Ошибка запуска или ненулевой код pfctl validation не должны считаться
    успехом. Проверить достижимость anchor, глобальные опции внутри anchor,
    все конфигурационные интерполяции, IPv6 и владение enable-reference tokens
@@ -86,7 +86,7 @@ firewall нельзя принимать без проверки. Изоляци
 - Регрессионные проверки с реалистичными fixtures netstat, ошибочными CIDR,
   отказом pfctl validation, дублями policy/snapshot, shell quoting, повреждённой
   конфигурацией, профилями в временном каталоге.
-- `swift build -c release` и `swift run -c release TunnelGuardSelfTest`.
+- `swift build -c release` и `swift run -c release RouteClueSelfTest`.
 - CLI help, валидный JSON, ненулевые exit codes при ошибках.
 - `./Scripts/build-app.sh release` и отдельная визуальная проверка GUI.
 - Отчёт исполнителя `docs/IMPLEMENTATION_REVIEW.md` с реальными командами,

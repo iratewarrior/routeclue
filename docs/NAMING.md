@@ -44,8 +44,7 @@
 
 ## Отсеянные варианты
 
-- TunnelGuard: [одноимённое приложение macOS](https://github.com/amirhp-com/tunnelguard)
-  в той же нише; дополнительно Guard создаёт ожидание защиты.
+- Прежнее рабочее название: отвергнуто из-за коллизий в той же нише; дополнительно Guard создаёт ожидание защиты.
 - TunnelScope: [существующий VPN analyzer](https://github.com/7-Bala/TunnelScope)
   и другие сетевые применения имени.
 - NetWhy: [существующая Linux-утилита диагностики](https://github.com/Ninso112/netwhy).

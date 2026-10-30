@@ -998,26 +998,26 @@ expect(blockedCheck?.detail.contains("Фактическая блокировк�
 do {
     let tempBase = FileManager.default.temporaryDirectory.appendingPathComponent("rc-store-\(UUID().uuidString)", isDirectory: true)
     let rcDir = tempBase.appendingPathComponent("RouteClue")
-    let tgDir = tempBase.appendingPathComponent("TunnelGuard")
+    let legacyDir = tempBase.appendingPathComponent("LegacyStore")
     try FileManager.default.createDirectory(at: tempBase, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tempBase) }
 
-    let store = ConfigStore(directory: rcDir, legacyDirectory: tgDir)
+    let store = ConfigStore(directory: rcDir, legacyDirectory: legacyDir)
 
     // Test A: Clean dir -> default config
     let freshConfig = try store.load()
     expect(freshConfig.corpSubnets.isEmpty, "Fresh load returns default empty config")
 
-    // Test B: Read-only fallback to legacy TunnelGuard config
-    try FileManager.default.createDirectory(at: tgDir, withIntermediateDirectories: true)
+    // Test B: Read-only fallback to legacy config
+    try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
     let legacyConfig = RouteClueConfig(corpSubnets: ["172.16.0.0/12"], lanInterfaces: ["en0"])
     let legacyData = try JSONEncoder().encode(legacyConfig)
     try legacyData.write(to: store.legacyFileURL)
 
     let fallbackLoaded = try store.load()
-    expectEqual(fallbackLoaded.corpSubnets, ["172.16.0.0/12"], "Fallback loads legacy TunnelGuard config")
+    expectEqual(fallbackLoaded.corpSubnets, ["172.16.0.0/12"], "Fallback loads legacy config")
 
-    // Test C: Explicit save writes to RouteClue directory and leaves TunnelGuard untouched
+    // Test C: Explicit save writes to RouteClue directory and leaves legacy config untouched
     var modified = fallbackLoaded
     modified.corpSubnets.append("10.50.0.0/16")
     try store.save(modified)
@@ -1029,7 +1029,7 @@ do {
     // Verify legacy file was NOT overwritten
     let legacyRaw = try Data(contentsOf: store.legacyFileURL)
     let legacyReloaded = try JSONDecoder().decode(RouteClueConfig.self, from: legacyRaw)
-    expectEqual(legacyReloaded.corpSubnets, ["172.16.0.0/12"], "Legacy TunnelGuard config was preserved unchanged")
+    expectEqual(legacyReloaded.corpSubnets, ["172.16.0.0/12"], "Legacy config was preserved unchanged")
 
     // Test D: Corrupted JSON in RouteClue config throws ConfigError.corrupted
     try "{ bad-json: true ".write(to: store.fileURL, atomically: true, encoding: .utf8)

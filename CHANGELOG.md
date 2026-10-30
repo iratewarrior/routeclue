@@ -4,7 +4,7 @@
 
 ### Rebranding & Architecture
 - **Unified Rebranding**: Migrated package, products, targets, imports, and CLI to `RouteClue` (`routeclue` CLI, `RouteClue.app`, `RouteClueSelfTest`).
-- **Configuration Store & Migration**: Configuration saved to `~/Library/Application Support/RouteClue` with seamless read-only fallback to legacy `TunnelGuard`. JSON parsing failures throw explicit `ConfigError.corrupted` without silently falling back or corrupting existing settings.
+- **Configuration Store**: Configuration saved to `~/Library/Application Support/RouteClue`. JSON parsing failures throw explicit `ConfigError.corrupted` without silently corrupting existing settings.
 
 ### Security & Hardening
 - **Isolated PF Anchors**: Kill switch operates exclusively in `com.apple/routeclue` with active ruleset reachability checks; eliminates global `/etc/pf.conf` overwrites and avoids global `pfctl -F all` or `pfctl -d`.

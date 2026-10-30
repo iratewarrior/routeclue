@@ -93,7 +93,6 @@ rm -rf /Applications/RouteClue.app
 ## Конфигурация
 
 Конфигурационный файл находится в `~/Library/Application Support/RouteClue/config.json`.
-RouteClue поддерживает автоматический read-only fallback на прежний путь `~/Library/Application Support/TunnelGuard/config.json`.
 Все параметры можно настраивать из CLI:
 
 ```bash

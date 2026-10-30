@@ -95,7 +95,6 @@ rm -rf /Applications/RouteClue.app
 ## Configure
 
 Configuration lives in `~/Library/Application Support/RouteClue/config.json`.
-RouteClue supports automatic read-only fallback to legacy `~/Library/Application Support/TunnelGuard/config.json`.
 Everything can be set from the CLI, no hand-editing required:
 
 ```bash

@@ -73,8 +73,7 @@ nameserver 10.0.0.11
 
 Removal operations check for explicit ownership before deleting any file, ensuring third-party resolver configurations are never damaged.
 
-## Configuration & migration
+## Configuration
 
 Configuration lives in `~/Library/Application Support/RouteClue/config.json`.
-When RouteClue config does not exist, `ConfigStore.load()` reads legacy `~/Library/Application Support/TunnelGuard/config.json` as a read-only fallback.
-All explicit saves write exclusively to the RouteClue directory without modifying or deleting legacy files. JSON parsing errors are never silently masked with defaults.
+All explicit saves write exclusively to the RouteClue directory. JSON parsing errors are never silently masked with defaults.

@@ -47,7 +47,7 @@ public enum KillSwitchError: Error, CustomStringConvertible, Sendable, Equatable
 /// or overwrite the global macOS ruleset or rules from other software (Docker, LuLu, etc.).
 public enum KillSwitch {
     public static let anchorName = "com.apple/routeclue"
-    public static let legacyAnchorName = "com.apple/tunnelguard"
+    public static let legacyAnchorName = "com.apple/routeclue.legacy"
 
     public static let defaultStateDir = "/var/run/routeclue"
     public static let defaultPfctlPath = "/sbin/pfctl"
@@ -74,7 +74,7 @@ public enum KillSwitch {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Возвращает токен старого TunnelGuard (только для legacy recovery).
+    /// Возвращает токен старой конфигурации (только для legacy recovery).
     public static func legacySavedToken() -> String? {
         guard let text = try? String(contentsOf: legacyTokenFileURL, encoding: .utf8) else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -136,7 +136,7 @@ public enum KillSwitch {
         return (true, "Анкер достижим из активного ruleset.")
     }
 
-    /// Обнаруживает, активен ли старый legacy anchor com.apple/tunnelguard.
+    /// Обнаруживает, активен ли старый legacy anchor.
     public static func isLegacyAnchorActive() -> Bool {
         guard let result = try? Shell.run("/sbin/pfctl", ["-a", legacyAnchorName, "-s", "rules"]), result.ok else {
             return false
@@ -608,7 +608,7 @@ public enum KillSwitch {
         let result = try Shell.privileged(script)
 
         if result.status == 5 || result.combined.contains("PARTIAL_SUCCESS") {
-            return "RouteClue anchor rules flushed and token released, but legacy TunnelGuard token release failed: \(result.combined)"
+            return "RouteClue anchor rules flushed and token released, but legacy token release failed: \(result.combined)"
         }
 
         if !result.ok {

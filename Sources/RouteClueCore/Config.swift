@@ -89,7 +89,7 @@ public struct ConfigStore: Sendable, Equatable {
         .appendingPathComponent("Library/Application Support/RouteClue", isDirectory: true)
 
     public static let defaultLegacyDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/TunnelGuard", isDirectory: true)
+        .appendingPathComponent("Library/Application Support/RouteClue/legacy", isDirectory: true)
 
     public static let standard = ConfigStore()
 
@@ -117,7 +117,7 @@ public struct ConfigStore: Sendable, Equatable {
             }
         }
 
-        // 2. Read-only fallback to legacy TunnelGuard config
+        // 2. Read-only fallback to legacy config
         if fm.fileExists(atPath: legacyFileURL.path) {
             do {
                 let data = try Data(contentsOf: legacyFileURL)
