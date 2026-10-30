@@ -1,6 +1,6 @@
 # Contributing
 
-1. `swift build` and `swift run TunnelGuardSelfTest` must pass locally (Command Line Tools are enough; no test framework is used).
+1. `swift build` and `swift run RouteClueSelfTest` must pass locally (Command Line Tools are enough; no test framework is used).
 2. Keep the core free of third-party dependencies.
 3. Any rule generation change needs a test — pf rejects malformed rules at load time, and a bad rule
    can silently cut network access.

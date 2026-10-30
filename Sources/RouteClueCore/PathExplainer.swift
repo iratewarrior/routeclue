@@ -1,6 +1,6 @@
 import Foundation
 
-public struct ResolverInfo: Sendable, Equatable {
+public struct ResolverInfo: Sendable, Equatable, Codable {
     public let domain: String?
     public let servers: [String]
     public let order: Int
@@ -12,16 +12,36 @@ public struct ResolverInfo: Sendable, Equatable {
     }
 }
 
-public struct IPPath: Sendable, Equatable {
+public struct IPPath: Sendable, Equatable, Codable {
     public let address: String
     public let interface: String?
     public let gateway: String?
     public let ifScoped: Bool
-    public let sourceAddress: String?
+    /// Configured IP address of the outgoing network interface (inferred from interface, not measured from a live socket).
+    public let interfaceAddress: String?
     public let warning: String?
+
+    /// Backwards compatibility alias for interfaceAddress.
+    public var sourceAddress: String? { interfaceAddress }
+
+    public init(
+        address: String,
+        interface: String?,
+        gateway: String?,
+        ifScoped: Bool,
+        interfaceAddress: String?,
+        warning: String?
+    ) {
+        self.address = address
+        self.interface = interface
+        self.gateway = gateway
+        self.ifScoped = ifScoped
+        self.interfaceAddress = interfaceAddress
+        self.warning = warning
+    }
 }
 
-public struct PathExplanation: Sendable {
+public struct PathExplanation: Sendable, Codable {
     public let host: String
     public let resolverDomain: String?
     public let resolverServers: [String]
@@ -33,13 +53,37 @@ public struct PathExplanation: Sendable {
     public let verdict: Verdict
     public let notes: [String]
 
-    public enum Verdict: String, Sendable {
+    public enum Verdict: String, Sendable, Codable {
         case viaTunnel = "through the tunnel"
         case direct = "direct (bypasses the tunnel)"
         case blocked = "blocked by policy"
         case dnsFailure = "broken: name does not resolve"
         case noRoute = "broken: no route"
         case loopback = "local (loopback)"
+    }
+
+    public init(
+        host: String,
+        resolverDomain: String?,
+        resolverServers: [String],
+        addresses: [String],
+        dnsError: String?,
+        paths: [IPPath],
+        killSwitchEnabled: Bool?,
+        tunnelUp: Bool,
+        verdict: Verdict,
+        notes: [String]
+    ) {
+        self.host = host
+        self.resolverDomain = resolverDomain
+        self.resolverServers = resolverServers
+        self.addresses = addresses
+        self.dnsError = dnsError
+        self.paths = paths
+        self.killSwitchEnabled = killSwitchEnabled
+        self.tunnelUp = tunnelUp
+        self.verdict = verdict
+        self.notes = notes
     }
 
     public var summary: String {
@@ -56,7 +100,7 @@ public struct PathExplanation: Sendable {
             let gw = path.gateway ?? "—"
             let iface = path.interface ?? "—"
             let scope = path.ifScoped ? "ifscope" : "no ifscope"
-            lines.append("Path \(path.address): \(iface) → \(gw) [\(scope)], source \(path.sourceAddress ?? "—")")
+            lines.append("Path \(path.address): \(iface) → \(gw) [\(scope)], interface IP \(path.interfaceAddress ?? "—")")
             if let warning = path.warning { lines.append("  ! \(warning)") }
         }
         let ks = killSwitchEnabled.map { $0 ? "on" : "off" } ?? "unknown"
@@ -67,10 +111,10 @@ public struct PathExplanation: Sendable {
     }
 }
 
-/// Explains the full path a connection takes on macOS: which resolver answers,
-/// which route wins, which source address is used, and whether policy would block it.
+/// Объясняет полный сетевой путь соединения на macOS: какой резолвер отвечает,
+/// какой маршрут побеждает, какой IP интерфейса используется, и блокирует ли трафик фаервол.
 public enum PathExplainer {
-    public static func explain(host: String, config: TGConfig) -> PathExplanation {
+    public static func explain(host: String, config: RouteClueConfig) -> PathExplanation {
         var notes: [String] = []
 
         let table = resolverTable()
@@ -123,10 +167,10 @@ public enum PathExplainer {
         for address in addresses {
             let match = longestPrefixMatch(address, routes: routes)
             let iface = match?.interface
-            let source = iface.flatMap { interfaceAddress($0) }
+            let ifAddr = iface.flatMap { interfaceAddress($0) }
             var warning: String?
-            if let iface, let tunnel, iface.hasPrefix(config.tunnelPrefix) == false, primary == tunnel, source == interfaceAddress(tunnel) {
-                warning = "Route is direct but the source address belongs to the tunnel — add -ifscope."
+            if let iface, let tunnel, iface.hasPrefix(config.tunnelPrefix) == false, primary == tunnel, ifAddr == interfaceAddress(tunnel) {
+                warning = "Route is direct but the interface address matches the tunnel — verify -ifscope."
             } else if let match, !match.ifScoped, let iface, iface != primary, iface.hasPrefix(config.tunnelPrefix) == false {
                 warning = "Interface differs from the default route and the route is not ifscope-scoped."
             }
@@ -136,7 +180,7 @@ public enum PathExplainer {
                     interface: iface,
                     gateway: match?.gateway,
                     ifScoped: match?.ifScoped ?? false,
-                    sourceAddress: source,
+                    interfaceAddress: ifAddr,
                     warning: warning
                 )
             )
@@ -149,16 +193,19 @@ public enum PathExplainer {
             verdict = .dnsFailure
         } else if paths.allSatisfy({ $0.interface == nil }) {
             verdict = .noRoute
+        } else if paths.contains(where: { $0.interface?.hasPrefix(config.tunnelPrefix) == true }) {
+            // Tunnel traffic routes through the VPN tunnel interface! Not blocked by direct allowlist!
+            verdict = .viaTunnel
         } else if killSwitch == true, !addresses.contains(where: { allowedByPolicy($0, config: config) }) {
             verdict = .blocked
-        } else if paths.contains(where: { $0.interface?.hasPrefix(config.tunnelPrefix) == true }) {
-            verdict = .viaTunnel
         } else {
             verdict = .direct
         }
 
         if killSwitch == true, verdict == .blocked {
-            notes.append("Kill switch is on and the destination is outside the allow policy.")
+            notes.append("Kill switch anchor is active and destination is outside allow policy. Note: processes running as uid 0 and pre-existing connection states bypass PF rules.")
+        } else if killSwitch == nil, !addresses.contains(where: { allowedByPolicy($0, config: config) }) {
+            notes.append("Destination is outside configured allow policy, but kill switch state is unknown (administrator privileges required to inspect PF).")
         }
 
         return PathExplanation(
@@ -176,7 +223,7 @@ public enum PathExplainer {
     }
 
     /// Whether a direct connection to this address is permitted by the configured policy.
-    public static func allowedByPolicy(_ address: String, config: TGConfig) -> Bool {
+    public static func allowedByPolicy(_ address: String, config: RouteClueConfig) -> Bool {
         var prefixes = config.killSwitch.allowNets + config.killSwitch.extraAllow
         if let path = config.killSwitch.allowListPath,
            let text = try? String(contentsOfFile: path, encoding: .utf8) {
@@ -186,8 +233,9 @@ public enum PathExplainer {
         }
         guard let ip = ipv4Value(address) else { return false }
         for prefix in prefixes {
-            let parts = prefix.split(separator: "/")
+            let parts = prefix.split(separator: "/", omittingEmptySubsequences: false)
             guard let bits = parts.count == 2 ? Int(parts[1]) : (prefix.contains(".") ? 32 : nil),
+                  bits >= 0 && bits <= 32,
                   let network = networkValue(String(parts[0]), bits: bits)
             else { continue }
             let mask: UInt32 = bits == 0 ? 0 : ~UInt32(0) << (32 - bits)
@@ -202,11 +250,14 @@ public enum PathExplainer {
     public static func systemResolvedAddresses(_ host: String) -> [String] {
         guard let result = try? Shell.run("/usr/bin/dscacheutil", ["-q", "host", "-a", "name", host]), result.ok
         else { return [] }
-        return result.stdout.split(separator: "\n").compactMap { line -> String? in
+        var list: [String] = []
+        for line in result.stdout.split(separator: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("ip_address:") else { return nil }
-            return trimmed.replacingOccurrences(of: "ip_address:", with: "").trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("ip_address:") else { continue }
+            let addr = trimmed.replacingOccurrences(of: "ip_address:", with: "").trimmingCharacters(in: .whitespaces)
+            if !addr.isEmpty { list.append(addr) }
         }
+        return list
     }
 
     public static func hostsFileAddress(_ host: String) -> String? {
@@ -242,8 +293,10 @@ public enum PathExplainer {
             if line.hasPrefix("domain :") {
                 domain = line.replacingOccurrences(of: "domain :", with: "").trimmingCharacters(in: .whitespaces)
             } else if line.hasPrefix("nameserver[") {
-                if let value = line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) {
-                    servers.append(value)
+                // Do not split on colon: IPv6 addresses contain colons!
+                if let colonIndex = line.firstIndex(of: ":") {
+                    let value = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+                    if !value.isEmpty { servers.append(String(value)) }
                 }
             } else if line.hasPrefix("order :") {
                 order = Int(line.replacingOccurrences(of: "order :", with: "").trimmingCharacters(in: .whitespaces)) ?? 0
@@ -255,10 +308,12 @@ public enum PathExplainer {
 
     /// Longest matching zone wins, as mDNSResponder does.
     public static func bestResolver(for host: String, in table: [ResolverInfo]) -> ResolverInfo? {
-        table
+        let lowerHost = host.lowercased()
+        return table
             .filter { info in
                 guard let domain = info.domain else { return false }
-                return host == domain || host.hasSuffix("." + domain)
+                let lowerDomain = domain.lowercased()
+                return lowerHost == lowerDomain || lowerHost.hasSuffix("." + lowerDomain)
             }
             .max { lhs, rhs in
                 (lhs.domain?.count ?? 0) < (rhs.domain?.count ?? 0)
@@ -271,38 +326,38 @@ public enum PathExplainer {
 
     // MARK: - Routes
 
-    public struct RouteEntry: Sendable, Equatable {
+    public struct RouteEntry: Sendable, Equatable, Codable {
         public let destination: String
         public let gateway: String?
         public let interface: String
         public let ifScoped: Bool
+        public let network: UInt32
+        public let bits: Int
 
         public init(destination: String, gateway: String?, interface: String, ifScoped: Bool) {
             self.destination = destination
             self.gateway = gateway
             self.interface = interface
             self.ifScoped = ifScoped
+            let parsed = RouteManager.parseNetstatDestination(destination) ?? (0, 0)
+            self.network = parsed.network
+            self.bits = parsed.prefix
         }
     }
 
-    public static func routeTable() -> [RouteEntry] {
-        guard let result = try? Shell.run("/usr/sbin/netstat", ["-rn", "-f", "inet"]) else { return [] }
+    public static func routeTable(netstatOutput: String? = nil) -> [RouteEntry] {
+        let raw = netstatOutput ?? ((try? Shell.run("/usr/sbin/netstat", ["-rn", "-f", "inet"]))?.stdout ?? "")
+        let rows = RouteManager.parseNetstatRows(raw)
         var entries: [RouteEntry] = []
-        for line in result.stdout.split(separator: "\n") {
-            let fields = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard fields.count >= 4 else { continue }
-            let destination = fields[0]
-            guard destination == "default" || destination.contains("/") else { continue }
-            let flags = fields[2]
-            guard flags.contains("U") else { continue }
-            let iface = fields.last ?? ""
-            guard iface.hasPrefix("en") || iface.hasPrefix("utun") || iface.hasPrefix("tun") else { continue }
+        for row in rows {
+            let iface = row.interface
+            guard iface.hasPrefix("en") || iface.hasPrefix("utun") || iface.hasPrefix("tun") || iface == "lo0" else { continue }
             entries.append(
                 RouteEntry(
-                    destination: destination,
-                    gateway: fields[1] == "link#1" ? nil : fields[1],
+                    destination: row.destination,
+                    gateway: row.isLinkLayer ? nil : row.gateway,
                     interface: iface,
-                    ifScoped: flags.contains("I")
+                    ifScoped: row.isScoped
                 )
             )
         }
@@ -313,31 +368,28 @@ public enum PathExplainer {
         guard let ip = ipv4Value(address) else { return routes.first { $0.destination == "default" } }
         var best: (RouteEntry, Int)?
         for route in routes {
-            if route.destination == "default" {
+            if route.destination == "default" || route.bits == 0 {
                 if best == nil { best = (route, 0) }
                 continue
             }
-            let parts = route.destination.split(separator: "/")
-            guard parts.count == 2, let bits = Int(parts[1]), let network = networkValue(String(parts[0]), bits: bits) else { continue }
-            let mask: UInt32 = bits == 0 ? 0 : ~UInt32(0) << (32 - bits)
-            if ip & mask == network, bits > (best?.1 ?? -1) {
-                best = (route, bits)
+            let mask: UInt32 = route.bits == 0 ? 0 : (~UInt32(0) << (32 - route.bits))
+            if (ip & mask) == route.network, route.bits > (best?.1 ?? -1) {
+                best = (route, route.bits)
             }
         }
         return best?.0
     }
 
     public static func networkValue(_ dotted: String, bits: Int) -> UInt32? {
-        let padded = dotted.split(separator: ".").map(String.init) + Array(repeating: "0", count: max(0, 4 - dotted.split(separator: ".").count))
+        guard bits >= 0 && bits <= 32 else { return nil }
+        let padded = dotted.split(separator: ".", omittingEmptySubsequences: false).map(String.init) + Array(repeating: "0", count: max(0, 4 - dotted.split(separator: ".").count))
         guard let value = ipv4Value(padded.joined(separator: ".")) else { return nil }
         let mask: UInt32 = bits == 0 ? 0 : ~UInt32(0) << (32 - bits)
         return value & mask
     }
 
     public static func ipv4Value(_ dotted: String) -> UInt32? {
-        let parts = dotted.split(separator: ".").compactMap { UInt32($0) }
-        guard parts.count == 4, parts.allSatisfy({ $0 < 256 }) else { return nil }
-        return parts.reduce(0) { ($0 << 8) | $1 }
+        RouteManager.parseIPv4(dotted)
     }
 
     // MARK: - Interfaces
@@ -345,7 +397,6 @@ public enum PathExplainer {
     public static func interfaceAddress(_ name: String) -> String? {
         guard let result = try? Shell.run("/sbin/ifconfig", [name]), result.ok else { return nil }
         for line in result.stdout.split(separator: "\n") where line.contains("inet ") {
-            // ifconfig indents lines with a tab, so split on any whitespace
             let parts = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             if let index = parts.firstIndex(of: "inet"), parts.count > index + 1 {
                 return parts[index + 1]

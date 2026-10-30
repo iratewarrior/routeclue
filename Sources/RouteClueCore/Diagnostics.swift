@@ -1,15 +1,31 @@
 import Foundation
 
-public struct ZoneCheck: Sendable {
+public struct ZoneCheck: Sendable, Codable, Equatable {
     public let zone: String
     public let nameservers: [String]
     public let serverAlive: Bool
     public let sampleHost: String?
     public let sampleAddresses: [String]
     public let latency: TimeInterval?
+
+    public init(
+        zone: String,
+        nameservers: [String],
+        serverAlive: Bool,
+        sampleHost: String?,
+        sampleAddresses: [String],
+        latency: TimeInterval?
+    ) {
+        self.zone = zone
+        self.nameservers = nameservers
+        self.serverAlive = serverAlive
+        self.sampleHost = sampleHost
+        self.sampleAddresses = sampleAddresses
+        self.latency = latency
+    }
 }
 
-public struct DiagnosticReport: Sendable {
+public struct DiagnosticReport: Sendable, Codable, Equatable {
     public let lanInterface: String?
     public let lanAddress: String?
     public let gateway: String?
@@ -21,6 +37,32 @@ public struct DiagnosticReport: Sendable {
     public let zones: [ZoneCheck]
     public let exitIP: String?
     public let notes: [String]
+
+    public init(
+        lanInterface: String?,
+        lanAddress: String?,
+        gateway: String?,
+        tunnelInterface: String?,
+        tunnelUp: Bool,
+        defaultInterface: String?,
+        resolvers: [String],
+        routes: [RouteStatus],
+        zones: [ZoneCheck],
+        exitIP: String?,
+        notes: [String]
+    ) {
+        self.lanInterface = lanInterface
+        self.lanAddress = lanAddress
+        self.gateway = gateway
+        self.tunnelInterface = tunnelInterface
+        self.tunnelUp = tunnelUp
+        self.defaultInterface = defaultInterface
+        self.resolvers = resolvers
+        self.routes = routes
+        self.zones = zones
+        self.exitIP = exitIP
+        self.notes = notes
+    }
 
     public var summary: String {
         var lines: [String] = []
@@ -98,7 +140,7 @@ public enum Diagnostics {
         )
     }
 
-    static func defaultRouteInterface() -> String? {
+    public static func defaultRouteInterface() -> String? {
         guard let result = try? Shell.run("/sbin/route", ["-n", "get", "default"]) else { return nil }
         return result.stdout
             .split(separator: "\n")
@@ -110,31 +152,35 @@ public enum Diagnostics {
 
     /// The tunnel is the default-route interface when it looks like a tunnel;
     /// otherwise the first tunnel interface that owns a routable IPv4 address.
-    static func tunnelInterface(prefix: String, defaultInterface: String?) -> String? {
+    public static func tunnelInterface(prefix: String, defaultInterface: String?) -> String? {
         if let defaultInterface, defaultInterface.hasPrefix(prefix) { return defaultInterface }
         guard let result = try? Shell.run("/sbin/ifconfig", ["-l"]) else { return nil }
         for name in result.stdout.split(separator: " ").map(String.init) where name.hasPrefix(prefix) {
             guard let info = try? Shell.run("/sbin/ifconfig", [name]), info.ok else { continue }
             for line in info.stdout.split(separator: "\n") where line.contains("inet ") {
-                let address = line.split(separator: " ")[1]
-                if !address.hasPrefix("169.254.") { return name }
+                let parts = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+                if let index = parts.firstIndex(of: "inet"), parts.count > index + 1 {
+                    let address = parts[index + 1]
+                    if !address.isEmpty { return name }
+                }
             }
         }
         return nil
     }
 
-    static func systemResolvers() -> [String] {
+    public static func systemResolvers() -> [String] {
         guard let result = try? Shell.run("/usr/sbin/scutil", ["--dns"]) else { return [] }
         var seen = Set<String>()
         for line in result.stdout.split(separator: "\n") where line.contains("nameserver[") {
-            if let value = line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces), !value.isEmpty {
-                seen.insert(value)
+            if let colonIndex = line.firstIndex(of: ":") {
+                let value = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty { seen.insert(String(value)) }
             }
         }
         return Array(seen).sorted()
     }
 
-    static func exitIP() -> String? {
+    public static func exitIP() -> String? {
         guard let result = try? Shell.run("/usr/bin/curl", ["-s", "--max-time", "6", "https://ident.me"]),
               result.ok, !result.stdout.isEmpty
         else { return nil }

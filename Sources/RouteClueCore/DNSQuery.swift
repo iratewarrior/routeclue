@@ -1,18 +1,24 @@
 import Foundation
 
-/// Минимальный DNS-клиент: один A-запрос по UDP, без зависимостей.
+/// Минимальный и безопасный DNS-клиент: один A-запрос по UDP, без зависимостей.
 /// Нужен для диагностики — проверить, отвечает ли конкретный сервер вообще,
 /// а не «открыт ли порт» (открытый порт при перехвате DNS ничего не значит).
 public enum DNSQuery {
-    public struct Answer: Sendable {
+    public struct Answer: Sendable, Codable, Equatable {
         public let rcode: Int
         public let addresses: [String]
         public let elapsed: TimeInterval
         public var ok: Bool { rcode == 0 }
+
+        public init(rcode: Int, addresses: [String], elapsed: TimeInterval) {
+            self.rcode = rcode
+            self.addresses = addresses
+            self.elapsed = elapsed
+        }
     }
 
     public static func a(_ name: String, server: String, timeout: TimeInterval = 2) -> Answer? {
-        guard let serverBytes = ipv4Bytes(server) else { return nil }
+        guard name.count <= 253, let serverBytes = ipv4Bytes(server) else { return nil }
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
@@ -20,7 +26,6 @@ public enum DNSQuery {
         var tv = timeval(tv_sec: Int(timeout), tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
-        let packet = buildQuery(name: name, id: 0x7A21)
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
@@ -29,27 +34,43 @@ public enum DNSQuery {
             raw.copyBytes(from: serverBytes)
         }
 
-        let started = Date()
-        let sent = withUnsafePointer(to: &addr) { pointer in
+        // Подключаем сокет к целевому DNS-серверу для фильтрации постороннего локального трафика
+        let connectResult = withUnsafePointer(to: &addr) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
-                sendto(fd, packet, packet.count, 0, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
+        guard connectResult == 0 else { return nil }
+
+        let queryId = UInt16.random(in: 1...UInt16.max)
+        let packet = buildQuery(name: name, id: queryId)
+        guard !packet.isEmpty else { return nil }
+
+        let started = Date()
+        let sent = send(fd, packet, packet.count, 0)
         guard sent == packet.count else { return nil }
 
         var buffer = [UInt8](repeating: 0, count: 2048)
         let received = recv(fd, &buffer, buffer.count, 0)
-        guard received > 0 else { return nil }
+        guard received >= 12 else { return nil }
 
         let elapsed = Date().timeIntervalSince(started)
         let response = Array(buffer.prefix(received))
-        let rcode = Int(response.count > 3 ? response[3] & 0x0F : 15)
+
+        // Проверяем соответствие ID ответа отправленному ID и наличие QR флага (ответ)
+        let respId = (UInt16(response[0]) << 8) | UInt16(response[1])
+        guard respId == queryId else { return nil }
+        let isResponse = (response[2] & 0x80) != 0
+        guard isResponse else { return nil }
+
+        let rcode = Int(response[3] & 0x0F)
         return Answer(rcode: rcode, addresses: parseAddresses(response), elapsed: elapsed)
     }
 
     // MARK: - Пакеты
 
     public static func buildQuery(name: String, id: UInt16) -> [UInt8] {
+        guard name.count <= 253 else { return [] }
         var bytes: [UInt8] = [
             UInt8(id >> 8), UInt8(id & 0xFF),
             0x01, 0x00, // RD
@@ -60,6 +81,7 @@ public enum DNSQuery {
         ]
         for label in name.split(separator: ".") {
             let utf8 = Array(label.utf8)
+            guard utf8.count > 0 && utf8.count <= 63 else { return [] }
             bytes.append(UInt8(utf8.count))
             bytes.append(contentsOf: utf8)
         }
@@ -109,8 +131,14 @@ public enum DNSQuery {
         return nil
     }
 
-    private static func ipv4Bytes(_ string: String) -> [UInt8]? {
-        let parts = string.split(separator: ".").compactMap { UInt8($0) }
-        return parts.count == 4 ? parts : nil
+    public static func ipv4Bytes(_ string: String) -> [UInt8]? {
+        let parts = string.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4 else { return nil }
+        var bytes: [UInt8] = []
+        for part in parts {
+            guard !part.isEmpty && part.allSatisfy(\.isNumber), let b = UInt8(part) else { return nil }
+            bytes.append(b)
+        }
+        return bytes
     }
 }

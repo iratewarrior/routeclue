@@ -1,74 +1,80 @@
 # Architecture
 
-TunnelGuard is a thin shell around four system facilities. There is no network extension, no
+RouteClue is a thin shell around macOS system network facilities. There is no network extension, no
 privileged daemon and no background service: every action is a command that runs when you ask.
 
 ```
-TunnelGuardApp (SwiftUI, menu bar)      tunnelguard (CLI)
+RouteClueApp (SwiftUI, menu bar)        routeclue (CLI)
                  \                      /
                   \                    /
-                 TunnelGuardCore (library)
-                   ├── RouteManager   routes, gateways, -ifscope
-                   ├── KillSwitch     pf ruleset generation and validation
-                   ├── DNSZones       /etc/resolver files
-                   ├── DNSQuery       minimal UDP DNS client for probes
-                   ├── Diagnostics    aggregated state
-                   ├── Config         JSON in Application Support
-                   └── Shell          Process wrapper + privileged execution
+                  RouteClueCore (library)
+                    ├── RouteManager   routes, gateways, -ifscope, BSD netstat parser
+                    ├── KillSwitch     pf isolated anchor management and fail-closed validation
+                    ├── DNSZones       /etc/resolver files with ownership checks
+                    ├── DNSQuery       minimal UDP DNS client for probes (IPv4/IPv6)
+                    ├── PathExplainer  DNS → route → interface IP → policy verdict
+                    ├── PolicyVerifier declarative policy checking (verify)
+                    ├── SnapshotDiff   network drift detection (snapshot/diff)
+                    ├── Diagnostics    aggregated state and interfaces
+                    ├── Config         JSON in Application Support (RouteClue + fallback)
+                    └── Shell          Process wrapper + concurrent pipes + privileged execution
 ```
 
 ## Privilege model
 
-Read operations (`route get`, `netstat`, `scutil`, `ifconfig`) run as the current user.
-Write operations (routes, `pfctl`, `/etc/resolver`) go through `Shell.privileged(_:)`:
+Read operations (`route get`, `netstat`, `scutil`, `ifconfig`, `dscacheutil`) run unprivileged as the current user.
+Write operations (routes, `pfctl`, `/etc/resolver`) execute via `Shell.privileged(_:)`:
 
-1. if the process is already root — run `/bin/sh -c` directly;
-2. otherwise — `osascript -e 'do shell script "..." with administrator privileges'`, which shows
+1. if the process is already root (`isRoot`) — run directly;
+2. otherwise — `osascript -e 'do shell script "..." with administrator privileges'`, which displays
    the standard macOS authorization dialog.
 
-There is no stored credential and no helper that keeps root after the action finishes.
+There is no stored credential, no background daemon, and no helper that keeps root after the action completes.
 
-## Kill switch ruleset
+## Kill switch ruleset & isolated PF anchor
 
-Generated from configuration on every `on`, written to `/tmp/tunnelguard-pf.conf`, parsed with
-`pfctl -n` (dry run) and only then applied with `pfctl -f` + `pfctl -E`.
+Rules are isolated inside the `com.apple/routeclue` anchor so they never flush, overwrite, or collide
+with `/etc/pf.conf` or third-party firewall rules (such as Docker, LuLu, or virtualization engines).
 
-Order matters: `pass` rules come first and are `quick`, so the final `block drop out quick ... all`
-only sees traffic that matched nothing above. System anchors from `/etc/pf.conf` are copied verbatim,
-otherwise loading a custom ruleset would disable the macOS application firewall.
+1. Before applying, `KillSwitch.validate` executes a dry-run check (`pfctl -n -a com.apple/routeclue -f -`).
+2. Reachability of the anchor is verified in the active kernel ruleset (`pfctl -sr`). If the anchor is unreachable,
+   application fails closed with an error instead of leaving network traffic unprotected.
+3. Allow-list entries are validated in memory and inlined directly into table definitions without unescaped file paths.
+4. On activation, `pfctl -E` reference tokens are safely tracked in `~/Library/Application Support/RouteClue/pf-token`
+   and released idempotently upon disable (`pfctl -X <token>`), without global `pfctl -d` or `pfctl -F all`.
 
-The allow rule is based on the socket owner (`user = 0`) instead of the VPN server address, because
-providers rotate servers and subnets. See `docs/SECURITY.md` for consequences.
+Order of rules:
+- `user = 0` (root/tunnel core) is permitted to communicate directly so the VPN daemon can reach its gateway.
+- ICMPv6 Neighbor Discovery (`ff02::/16`, `fe80::/10`) is allowed to prevent Happy Eyeballs hangs.
+- Explicit allowed networks, inlined allow-list tables, and specified DNS servers are permitted.
+- `block drop out quick ... all` drops all other outbound traffic on physical interfaces.
 
 ## Route healing
 
-`RouteManager.ensure` reads the LAN gateway from `ipconfig getoption <iface> router`, then for each
-configured subnet:
+`RouteManager.ensure` determines the current LAN gateway via `ipconfig getoption <iface> router`, validates
+all CIDR subnets strictly, and executes an atomic privileged batch with `set -e`:
 
-```
-route delete -net <subnet>                 # drop stale entry, ignore errors
-route add -net <subnet> <gw> -ifscope <if> # pin source address to the LAN interface
+```sh
+route delete -net <subnet>
+route add -net <subnet> <gw> -ifscope <if>
 ```
 
-`-ifscope` is the important part: without it macOS may pick the source address of the primary
-interface (the tunnel) and the corporate network silently drops such packets.
+`-ifscope` ensures packets use the physical interface and its IP, preventing corporate network drops.
 
 ## Split DNS
 
-For each enabled zone a file is written to `/etc/resolver/<zone>`:
+For each configured and enabled zone, RouteClue writes `/etc/resolver/<zone>` with ownership headers:
 
 ```
+# Generated by RouteClue — do not edit
 nameserver 10.0.0.10
 nameserver 10.0.0.11
-search_order 1
-timeout 2
 ```
 
-mDNSResponder consults these before the global resolvers. `dig` and `nslookup` do not, which is why
-diagnostics use `dscacheutil`-level checks and a raw DNS client instead.
+Removal operations check for explicit ownership before deleting any file, ensuring third-party resolver configurations are never damaged.
 
-## Diagnostics
+## Configuration & migration
 
-`DNSQuery` builds a single A-record query, sends it over UDP with a timeout and parses the answer,
-including compressed names. This distinguishes "server is down" from "port is open because something
-intercepts DNS" — a difference that plain port checks cannot see.
+Configuration lives in `~/Library/Application Support/RouteClue/config.json`.
+When RouteClue config does not exist, `ConfigStore.load()` reads legacy `~/Library/Application Support/TunnelGuard/config.json` as a read-only fallback.
+All explicit saves write exclusively to the RouteClue directory without modifying or deleting legacy files. JSON parsing errors are never silently masked with defaults.

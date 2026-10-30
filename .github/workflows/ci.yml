@@ -15,6 +15,6 @@ jobs:
       - name: Build
         run: swift build -c release
       - name: Test
-        run: swift run -c release TunnelGuardSelfTest
+        run: swift run -c release RouteClueSelfTest
       - name: Package app bundle
         run: ./Scripts/build-app.sh release
