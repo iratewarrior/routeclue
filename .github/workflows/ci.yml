@@ -10,6 +10,13 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 16 (Swift 6)
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name "Xcode_16*.app" | sort -V | tail -n 1)
+          if [ -n "$XCODE" ]; then
+            echo "Selecting $XCODE"
+            sudo xcode-select -s "$XCODE/Contents/Developer"
+          fi
       - name: Show toolchain
         run: swift --version
       - name: Build
